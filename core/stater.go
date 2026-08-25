@@ -68,6 +68,9 @@ func Start(cfg config.Config) {
 		log.Fatalf("无法检测文件类型: %v\n", err)
 		return
 	}
+
+	// 启动健康探针(若启用)
+	startHealthProbe(cfg)
 	if cfg.FileLogEnabled {
 		procName := filepath.Base(cfg.Path)
 		fl, ferr := dclog.NewFileLogger(cfg.LocalLogPath, procName, cfg.LocalLogLifeDay)
@@ -100,9 +103,124 @@ func Start(cfg config.Config) {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	mux := http.NewServeMux()
+	// Web UI: 嵌入的单文件 HTML, /ui 与 /ui/ 都直接返回页面
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(webuiHTML)
+	})
+	mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(webuiHTML)
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintln(w, rootMsg)
+	})
+	// /healthz: K8s/LB 健康检查. 管理器与子进程都健康才返回 200
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if err := checkPassword(r, cfg.Password); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprintln(w, rootMsg)
+			return
+		}
+		procState.ProcessMu.Lock()
+		healthy := procState.IsRunning && procState.CurrentProcess != nil
+		procState.ProcessMu.Unlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if healthy {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "ok")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, "process not running")
+		}
+	})
+	// /readyz: 同 healthz, 语义拆开便于 K8s 配置 livenessProbe vs readinessProbe
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		if err := checkPassword(r, cfg.Password); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprintln(w, rootMsg)
+			return
+		}
+		procState.ProcessMu.Lock()
+		ready := procState.IsRunning && procState.CurrentProcess != nil
+		procState.ProcessMu.Unlock()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if ready {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "ready")
+		} else {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, "not ready")
+		}
+	})
+	// /metrics: Prometheus 文本格式指标
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if err := checkPassword(r, cfg.Password); err != nil {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprintln(w, rootMsg)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		procState.ProcessMu.Lock()
+		var (
+			stateFloat float64
+			pid        int
+			restartCnt = procState.RestartCount
+			fileType   = procState.FileType
+			procPath   = cfg.Path
+			lastExitTs string
+			lastExitCd = procState.ExitInfo.LastExitCode
+		)
+		if procState.IsRunning && procState.CurrentProcess != nil {
+			stateFloat = 1
+			pid = procState.CurrentProcess.Process.Pid
+		} else {
+			stateFloat = 0
+		}
+		if !procState.ExitInfo.LastExitTime.IsZero() {
+			lastExitTs = procState.ExitInfo.LastExitTime.Format(time.RFC3339)
+		}
+		procState.ProcessMu.Unlock()
+
+		logMu.Lock()
+		logLines := len(logCache)
+		logMu.Unlock()
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprintf(w, "# HELP dontcrack_up 管理器是否在运行(始终 1)\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_up gauge\n")
+		fmt.Fprintf(w, "dontcrack_up 1\n")
+		fmt.Fprintf(w, "# HELP dontcrack_process_state 子进程运行状态 1=running 0=stopped\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_process_state gauge\n")
+		fmt.Fprintf(w, "dontcrack_process_state %d\n", int(stateFloat))
+		fmt.Fprintf(w, "# HELP dontcrack_process_pid 子进程 PID\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_process_pid gauge\n")
+		fmt.Fprintf(w, "dontcrack_process_pid %d\n", pid)
+		fmt.Fprintf(w, "# HELP dontcrack_restart_count 累计自动重启次数\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_restart_count counter\n")
+		fmt.Fprintf(w, "dontcrack_restart_count %d\n", restartCnt)
+		fmt.Fprintf(w, "# HELP dontcrack_last_exit_code 子进程上次退出码\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_last_exit_code gauge\n")
+		fmt.Fprintf(w, "dontcrack_last_exit_code %d\n", lastExitCd)
+		fmt.Fprintf(w, "# HELP dontcrack_last_exit_time_seconds 子进程上次退出 unix 时间戳\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_last_exit_time_seconds gauge\n")
+		var exitTs float64
+		if lastExitTs != "" {
+			if t, err := time.Parse(time.RFC3339, lastExitTs); err == nil {
+				exitTs = float64(t.Unix())
+			}
+		}
+		fmt.Fprintf(w, "dontcrack_last_exit_time_seconds %d\n", int(exitTs))
+		fmt.Fprintf(w, "# HELP dontcrack_log_lines 内存中缓存的日志行数\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_log_lines gauge\n")
+		fmt.Fprintf(w, "dontcrack_log_lines %d\n", logLines)
+		fmt.Fprintf(w, "# HELP dontcrack_info 版本/平台信息\n")
+		fmt.Fprintf(w, "# TYPE dontcrack_info gauge\n")
+		fmt.Fprintf(w, "dontcrack_info{version=%q,file_type=%q,process_path=%q} 1\n", cfg.Version, fileType, procPath)
 	})
 	mux.HandleFunc("/startup", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
@@ -371,6 +489,64 @@ func createCommand(cfg config.Config) *osexec.Cmd {
 
 	cmd.Dir = filepath.Dir(cfg.Path)
 	return cmd
+}
+
+// startHealthProbe 启动健康探针 goroutine（若配置启用）
+// Windows 平台用 cmd.exe /C 包装探针命令
+func startHealthProbe(cfg config.Config) {
+	if cfg.ProbeCmd == "" {
+		return
+	}
+	interval := time.Duration(cfg.ProbeInterval) * time.Second
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	timeout := time.Duration(cfg.ProbeTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	limit := cfg.ProbeFailureLimit
+	if limit <= 0 {
+		limit = 3
+	}
+	log.Printf("健康探针已启用：%q, 间隔=%s, 超时=%s, 失败阈值=%d", cfg.ProbeCmd, interval, timeout, limit)
+
+	go func() {
+		consecutiveFails := 0
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			procState.ProcessMu.Lock()
+			running := procState.IsRunning && procState.CurrentProcess != nil
+			cmd := procState.CurrentProcess
+			procState.ProcessMu.Unlock()
+			if !running {
+				consecutiveFails = 0
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			shellPath := findShell()
+			if shellPath == "" {
+				shellPath = "cmd"
+			}
+			probe := osexec.CommandContext(ctx, shellPath, "/C", cfg.ProbeCmd)
+			err := probe.Run()
+			cancel()
+			if err != nil {
+				consecutiveFails++
+				log.Printf("健康探针失败 (%d/%d): %v", consecutiveFails, limit, err)
+				if consecutiveFails >= limit {
+					log.Printf("健康探针连续失败 %d 次, 主动 Kill 子进程", limit)
+					if cmd != nil && cmd.Process != nil {
+						_ = cmd.Process.Kill()
+					}
+					consecutiveFails = 0
+				}
+			} else {
+				consecutiveFails = 0
+			}
+		}
+	}()
 }
 
 // startProcess 启动并监控子进程

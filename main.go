@@ -26,6 +26,11 @@ func main() {
 	autoRestart := flag.Bool("auto-restart", false, "是否自动重启（可选，默认false）")                                            // 是否开启自动重启
 	maxRetries := flag.Int("max-retries", 3, "最大重试次数（可选，-1表示无限次，默认3次）")                                              // 重启最大重试次数
 	startNow := flag.Bool("start-now", false, "是否立即启动（可选，默认false）")                                                  // 是否立即启动子进程
+	// 健康探针（可选，留空则不启用）
+	probeCmd := flag.String("probe-cmd", "", "子进程健康检查命令（如 \"powershell -Command Test-NetConnection 127.0.0.1 -Port 80\"），留空禁用") // 探针命令
+	probeInterval := flag.Int("probe-interval", 30, "探针间隔秒数（可选，默认30）")                                                       // 探针间隔
+	probeTimeout := flag.Int("probe-timeout", 5, "探针超时秒数（可选，默认5）")                                                            // 探针超时
+	probeFailureLimit := flag.Int("probe-failure-limit", 3, "连续失败多少次判定为不健康（可选，默认3）")                                   // 探针失败阈值
 	// 管理器相关
 	port := flag.Int("port", 11883, "HTTP服务端口(可选，默认11883)")                                                       // 管理端口、mcp连接端口
 	password := flag.String("password", "", "管理进程的密码（可选，默认为空且不开启密码保护）")                                                // 管理密码
@@ -39,9 +44,10 @@ func main() {
 	flag.Parse()
 
 	// 将传入的配置信息转换为全局配置结构体
-	config := config.ParseConfig(version, *path, *args, *pre, *env, *autoRestart,
+	config := config.ParseConfigWithProbe(version, *path, *args, *pre, *env, *autoRestart,
 		*maxRetries, *startNow, *port, *password, *logCapacity, *logMaxLineBytes,
-		*fileLogEnabled, *localLogPath, *localLogLifeDay)
+		*fileLogEnabled, *localLogPath, *localLogLifeDay,
+		*probeCmd, *probeInterval, *probeTimeout, *probeFailureLimit)
 
 	// 携带启动参数启动管理器
 	core.Start(*config)
