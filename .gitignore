@@ -8,18 +8,59 @@
 # Test binary, build with `go test -c`
 *.test
 
+# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Windows
+# Coverage tools
+coverage.*
+
+# Windows-specific
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
 Desktop.ini
 *.lnk
 
 # Go build outputs (Windows)
 /DontCrack.exe
+/DontCrack
 /childproc.exe
+/childproc
 /edgecore.exe
 /SimpleWebShell.exe
 
-# macOS metadata artifacts (开发机/编辑器产生)
+# ============================================
+# OS / Editor / IDE 噪音屏蔽
+# ============================================
+
+# macOS Finder
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux trash
+.Trash-*
+
+# Editors / IDE
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+.vscode/
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+
+# Logs / runtime
+*.log
+logs/
+tmp/
+temp/
+
+# Git worktrees
+.worktrees/
