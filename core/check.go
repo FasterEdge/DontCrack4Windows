@@ -1,6 +1,7 @@
 package core
 
 import (
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
@@ -76,8 +77,15 @@ func checkPassword(r *http.Request, expected string) error {
 	if expected == "" {
 		return nil
 	}
-	pw := r.URL.Query().Get("password")
-	if pw == expected {
+	pw := ""
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		pw = strings.TrimPrefix(auth, "Bearer ")
+	} else if v := r.Header.Get("X-DontCrack-Password"); v != "" {
+		pw = v
+	} else {
+		pw = r.URL.Query().Get("password")
+	}
+	if subtle.ConstantTimeCompare([]byte(pw), []byte(expected)) == 1 {
 		return nil
 	}
 	return errors.New("unauthorized")

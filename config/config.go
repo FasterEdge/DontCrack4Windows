@@ -24,6 +24,7 @@ type Config struct {
 	ProbeFailureLimit int    // 连续失败多少次算不健康(默认3)
 	// 管理器相关
 	Port            int    // 管理进程使用的进程端口(可选，默认11883)
+	ListenAddress   string // HTTP 监听地址(可选，默认 127.0.0.1，仅本机访问)
 	Password        string // 管理进程使用的密码(可选)
 	LogCapacity     int    // 日志容量(可选，默认10MB)
 	LogMaxLineBytes int    // 日志单行最大字节数(可选，默认1KB)
@@ -35,6 +36,13 @@ type Config struct {
 // 将传入的参数转换为全局配置结构体
 func ParseConfig(version string, path string, args string, pre string, env string, autoRestart bool, restartTimes int, startNow bool,
 	port int, password string, logCapacity int, logMaxLineBytes int, fileLogEnabled bool, localLogPath string, localLogLifeDay int) *Config {
+	return ParseConfigListen(version, path, args, pre, env, autoRestart, restartTimes, startNow,
+		port, "127.0.0.1", password, logCapacity, logMaxLineBytes, fileLogEnabled, localLogPath, localLogLifeDay)
+}
+
+// ParseConfigListen 是带监听地址的完整构造函数
+func ParseConfigListen(version string, path string, args string, pre string, env string, autoRestart bool, restartTimes int, startNow bool,
+	port int, listenAddress string, password string, logCapacity int, logMaxLineBytes int, fileLogEnabled bool, localLogPath string, localLogLifeDay int) *Config {
 	config := new(Config)
 	config.Version = version
 	config.Path = path
@@ -46,6 +54,10 @@ func ParseConfig(version string, path string, args string, pre string, env strin
 	config.StartNow = startNow
 	// 探针默认关闭，所有参数留零值，stater.go 中会用 cfg.ProbeCmd != "" 判断是否启用
 	config.Port = port
+	if listenAddress == "" {
+		listenAddress = "127.0.0.1"
+	}
+	config.ListenAddress = listenAddress
 	config.Password = password
 	config.LogCapacity = logCapacity
 	config.LogMaxLineBytes = logMaxLineBytes
@@ -59,8 +71,17 @@ func ParseConfig(version string, path string, args string, pre string, env strin
 func ParseConfigWithProbe(version string, path string, args string, pre string, env string, autoRestart bool, restartTimes int, startNow bool,
 	port int, password string, logCapacity int, logMaxLineBytes int, fileLogEnabled bool, localLogPath string, localLogLifeDay int,
 	probeCmd string, probeInterval int, probeTimeout int, probeFailureLimit int) *Config {
-	c := ParseConfig(version, path, args, pre, env, autoRestart, restartTimes, startNow,
-		port, password, logCapacity, logMaxLineBytes, fileLogEnabled, localLogPath, localLogLifeDay)
+	return ParseConfigListenWithProbe(version, path, args, pre, env, autoRestart, restartTimes, startNow,
+		port, "127.0.0.1", password, logCapacity, logMaxLineBytes, fileLogEnabled, localLogPath, localLogLifeDay,
+		probeCmd, probeInterval, probeTimeout, probeFailureLimit)
+}
+
+// ParseConfigListenWithProbe 是带监听地址和探针参数的完整构造函数
+func ParseConfigListenWithProbe(version string, path string, args string, pre string, env string, autoRestart bool, restartTimes int, startNow bool,
+	port int, listenAddress string, password string, logCapacity int, logMaxLineBytes int, fileLogEnabled bool, localLogPath string, localLogLifeDay int,
+	probeCmd string, probeInterval int, probeTimeout int, probeFailureLimit int) *Config {
+	c := ParseConfigListen(version, path, args, pre, env, autoRestart, restartTimes, startNow,
+		port, listenAddress, password, logCapacity, logMaxLineBytes, fileLogEnabled, localLogPath, localLogLifeDay)
 	c.ProbeCmd = probeCmd
 	c.ProbeInterval = probeInterval
 	c.ProbeTimeout = probeTimeout

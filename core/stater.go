@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	osexec "os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -40,10 +42,11 @@ const logo = `
 const rootMsg = "DontCrack_windows By FasterEdge"
 
 var (
-	procState   pmexec.Process
-	logCache    []string
-	logMu       sync.Mutex
-	fileLogger  *dclog.FileLogger
+	procState      pmexec.Process
+	logCache       []string
+	logMu          sync.Mutex
+	fileLogger     *dclog.FileLogger
+	shutdownSignal = make(chan struct{})
 )
 
 // 初始化并启动管理器
@@ -119,8 +122,8 @@ func Start(cfg config.Config) {
 	// /healthz: K8s/LB 健康检查. 管理器与子进程都健康才返回 200
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		procState.ProcessMu.Lock()
@@ -138,8 +141,8 @@ func Start(cfg config.Config) {
 	// /readyz: 同 healthz, 语义拆开便于 K8s 配置 livenessProbe vs readinessProbe
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		procState.ProcessMu.Lock()
@@ -157,8 +160,8 @@ func Start(cfg config.Config) {
 	// /metrics: Prometheus 文本格式指标
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -224,11 +227,11 @@ func Start(cfg config.Config) {
 	})
 	mux.HandleFunc("/startup", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -243,8 +246,8 @@ func Start(cfg config.Config) {
 	})
 	mux.HandleFunc("/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if r.Method != http.MethodGet {
@@ -252,7 +255,8 @@ func Start(cfg config.Config) {
 			return
 		}
 		logMu.Lock()
-		logsCopy := logCache
+		logsCopy := make([]string, len(logCache))
+		copy(logsCopy, logCache)
 		logCache = nil
 		logMu.Unlock()
 
@@ -299,11 +303,11 @@ func Start(cfg config.Config) {
 	})
 	mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		if err := checkPassword(r, cfg.Password); err != nil {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprintln(w, rootMsg)
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -315,7 +319,7 @@ func Start(cfg config.Config) {
 	})
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
+		Addr:         net.JoinHostPort(cfg.ListenAddress, strconv.Itoa(cfg.Port)),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -337,7 +341,10 @@ func Start(cfg config.Config) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if procState.IsRunning {
+	procState.ProcessMu.Lock()
+	running := procState.IsRunning
+	procState.ProcessMu.Unlock()
+	if running {
 		log.Println("正在停止管理的进程...")
 		if err := stopProcess(); err != nil {
 			log.Printf("停止进程时出错: %v", err)
@@ -348,6 +355,7 @@ func Start(cfg config.Config) {
 		log.Printf("HTTP服务器关闭出错: %v", err)
 	}
 
+	close(shutdownSignal)
 	log.Println("进程管理器已优雅关闭")
 }
 
@@ -515,7 +523,12 @@ func startHealthProbe(cfg config.Config) {
 		consecutiveFails := 0
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
+		for {
+			select {
+			case <-shutdownSignal:
+				return
+			case <-ticker.C:
+			}
 			procState.ProcessMu.Lock()
 			running := procState.IsRunning && procState.CurrentProcess != nil
 			cmd := procState.CurrentProcess

@@ -57,7 +57,6 @@ func main() {
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
 
-	exitCode := 0
 	crashCode := 42
 
 	for {
@@ -89,8 +88,6 @@ func main() {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-
-	os.Exit(exitCode)
 }
 
 func parseIntDefault(s string, def int) int {

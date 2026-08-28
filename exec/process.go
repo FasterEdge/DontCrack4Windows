@@ -18,6 +18,7 @@ type Process struct {
 	FileType       string     // 可执行文件类型
 	Pid            int        // 进程ID
 	ExitInfo       ProcessExit
+	generation     uint64 // 进程代际：每次启动递增，用于校验过期的重启计划
 	stoppedByReq   bool
 }
 
@@ -94,6 +95,7 @@ func (p *Process) StartManagedProcess(h Hooks) error {
 	p.CurrentProcess = cmd
 	p.IsRunning = true
 	p.Pid = cmd.Process.Pid
+	p.generation++
 	if h.OnStarted != nil {
 		h.OnStarted(cmd)
 	}
@@ -164,10 +166,23 @@ func (p *Process) StopManagedProcess(timeout time.Duration) error {
 
 // monitor 等待进程退出并回调 OnExit；如果需要，自动重启
 func (p *Process) monitor(cmd *exec.Cmd, h Hooks) {
+	// 快照自身代际：若等待期间发生了新的启动/停止(代际变化)，则本 monitor 已过期
+	p.ProcessMu.Lock()
+	myGeneration := p.generation
+	p.ProcessMu.Unlock()
+
 	err := cmd.Wait()
 
 	p.ProcessMu.Lock()
-	p.IsRunning = false
+	// 仅当退出的 cmd 仍是当前进程且代际未变时才清理状态
+	if p.CurrentProcess == cmd && p.generation == myGeneration {
+		p.IsRunning = false
+	}
+	if p.generation != myGeneration {
+		// 已被新一代取代，退出，不做任何重启决策
+		p.ProcessMu.Unlock()
+		return
+	}
 	pid := 0
 	if cmd.Process != nil {
 		pid = cmd.Process.Pid
@@ -194,21 +209,45 @@ func (p *Process) monitor(cmd *exec.Cmd, h Hooks) {
 	// 否则 auto-restart 开启时 /shutdown 杀掉当前进程后 monitor 又把它拉起来，
 	// 造成"关都关不掉"的暗病。
 	if exitInfo.StoppedByRequest {
+		p.ProcessMu.Unlock()
 		return
 	}
 
-	if h.AutoRestart && (h.RestartTimes < 0 || p.RestartCount < h.RestartTimes) {
+	// 在锁内完成重启判定与计数自增，消除与 /startup 重置之间的数据竞争
+	shouldRestart := h.AutoRestart && (h.RestartTimes < 0 || p.RestartCount < h.RestartTimes)
+	if shouldRestart {
 		p.RestartCount++
-		delay := h.RestartDelay
-		if delay == 0 {
-			delay = 2 * time.Second
+	}
+	restartCount := p.RestartCount
+	p.ProcessMu.Unlock()
+
+	if !shouldRestart {
+		if h.AutoRestart && h.Logf != nil {
+			h.Logf("已达到最大重试次数 %d，停止自动重启 (pid=%d)", h.RestartTimes, pid)
 		}
+		return
+	}
+
+	delay := h.RestartDelay
+	if delay == 0 {
+		delay = 2 * time.Second
+	}
+	if h.Logf != nil {
+		h.Logf("准备重启进程，当前重试次数: %d/%d", restartCount, h.RestartTimes)
+	}
+	time.Sleep(delay)
+
+	// 睡眠后重新校验：期间若发生手动 startup/shutdown 或已有进程运行，放弃过期重启
+	p.ProcessMu.Lock()
+	stale := p.generation != myGeneration || p.IsRunning || p.CurrentProcess != nil
+	p.ProcessMu.Unlock()
+	if stale {
 		if h.Logf != nil {
-			h.Logf("准备重启进程，当前重试次数: %d/%d", p.RestartCount, h.RestartTimes)
+			h.Logf("重启计划已过期(进程被手动管理)，跳过本次自动重启")
 		}
-		time.Sleep(delay)
-		_ = p.StartManagedProcess(h)
-	} else if h.AutoRestart && h.Logf != nil {
-		h.Logf("已达到最大重试次数 %d，停止自动重启 (pid=%d)", h.RestartTimes, pid)
+		return
+	}
+	if err := p.StartManagedProcess(h); err != nil && h.Logf != nil {
+		h.Logf("自动重启失败: %v", err)
 	}
 }

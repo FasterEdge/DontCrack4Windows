@@ -33,6 +33,7 @@ func main() {
 	probeFailureLimit := flag.Int("probe-failure-limit", 3, "连续失败多少次判定为不健康（可选，默认3）")                                   // 探针失败阈值
 	// 管理器相关
 	port := flag.Int("port", 11883, "HTTP服务端口(可选，默认11883)")                                                       // 管理端口、mcp连接端口
+	listenAddress := flag.String("listen-address", "127.0.0.1", "HTTP监听地址（可选，默认127.0.0.1仅本机访问；对外监听必须配置密码）")
 	password := flag.String("password", "", "管理进程的密码（可选，默认为空且不开启密码保护）")                                                // 管理密码
 	logCapacity := flag.Int("log-capacity", 200, "日志缓存的最大行数（可选，默认200)")                                                   // 日志缓存的最大行数
 	logMaxLineBytes := flag.Int("log-max-line-bytes", 1048576, "单行日志的最大字节数（可选，用于bufio.Scanner，默认1MiB）")                       // 单行日志的最大字节数
@@ -44,8 +45,14 @@ func main() {
 	flag.Parse()
 
 	// 将传入的配置信息转换为全局配置结构体
-	config := config.ParseConfigWithProbe(version, *path, *args, *pre, *env, *autoRestart,
-		*maxRetries, *startNow, *port, *password, *logCapacity, *logMaxLineBytes,
+	// 安全缺省: 非环回监听时必须配置密码，否则管理接口会暴露给整个网络
+	if *listenAddress != "127.0.0.1" && *listenAddress != "localhost" && *listenAddress != "::1" && *password == "" {
+		flag.Usage()
+		panic("对外监听(" + *listenAddress + ")必须通过 -password 配置管理密码，否则请保持默认 127.0.0.1")
+	}
+
+	config := config.ParseConfigListenWithProbe(version, *path, *args, *pre, *env, *autoRestart,
+		*maxRetries, *startNow, *port, *listenAddress, *password, *logCapacity, *logMaxLineBytes,
 		*fileLogEnabled, *localLogPath, *localLogLifeDay,
 		*probeCmd, *probeInterval, *probeTimeout, *probeFailureLimit)
 
