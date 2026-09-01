@@ -16,12 +16,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: linux-amd64,   goos: linux,   goarch: amd64, ext: ''   }
-          - { target: linux-arm64,   goos: linux,   goarch: arm64, ext: ''   }
-          - { target: darwin-amd64,  goos: darwin,  goarch: amd64, ext: ''   }
-          - { target: darwin-arm64,  goos: darwin,  goarch: arm64, ext: ''   }
+
           - { target: windows-amd64, goos: windows, goarch: amd64, ext: .exe }
           - { target: windows-arm64, goos: windows, goarch: arm64, ext: .exe }
+          - { target: windows-386,   goos: windows, goarch: 386,   ext: .exe }
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
