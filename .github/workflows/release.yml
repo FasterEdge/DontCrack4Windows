@@ -43,7 +43,7 @@ jobs:
     - uses: actions/upload-artifact@v4
       with:
         name: 'dontcrack-windows-${{ matrix.target }}'
-        path: 'dontcrack-windows-${{ matrix.target }}.tar.gz'
+        path: '${{ github.workspace }}/dontcrack-windows-${{ matrix.target }}.*'
         if-no-files-found: 'error'
         retention-days: 1
 
