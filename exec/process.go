@@ -213,12 +213,14 @@ func (p *Process) monitor(cmd *exec.Cmd, h Hooks) {
 	// 手动停止(HTTP /shutdown 或管理器关机触发的停止)后不再自动重启。
 	// 否则 auto-restart 开启时 /shutdown 杀掉当前进程后 monitor 又把它拉起来，
 	// 造成"关都关不掉"的暗病。
+	// 手动停止(HTTP /shutdown 或管理器关机触发的停止)后不再自动重启。
+	// 这里锁已在上方释放，无需再 Unlock（历史 bug：此处曾重复解锁导致 panic）
 	if exitInfo.StoppedByRequest {
-		p.ProcessMu.Unlock()
 		return
 	}
 
 	// 在锁内完成重启判定与计数自增，消除与 /startup 重置之间的数据竞争
+	p.ProcessMu.Lock()
 	shouldRestart := h.AutoRestart && (h.RestartTimes < 0 || p.RestartCount < h.RestartTimes)
 	if shouldRestart {
 		p.RestartCount++
