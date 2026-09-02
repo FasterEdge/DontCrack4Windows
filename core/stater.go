@@ -1,3 +1,4 @@
+// FasterEdge 开源项目 - Github: https://github.com/FasterEdge - Gitee: https://gitee.com/FasterEdge
 package core
 
 // FasterEdge - 对称、可靠、安全的多场景边缘计算框架
