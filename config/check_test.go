@@ -33,8 +33,18 @@ func TestCheckConfigRejectsInvalidNumericParams(t *testing.T) {
 		{"invalid retry count", func(c *Config) { c.RestartTimes = -2 }, "max-retries"},
 		{"negative log life day", func(c *Config) { c.LocalLogLifeDay = -1 }, "log-life-day"},
 		{"probe without interval", func(c *Config) { c.ProbeCmd = "true"; c.ProbeInterval = 0; c.ProbeTimeout = 5; c.ProbeFailureLimit = 3 }, "probe-interval"},
-		{"probe without timeout", func(c *Config) { c.ProbeCmd = "true"; c.ProbeTimeout = 0; c.ProbeInterval = 30; c.ProbeFailureLimit = 3 }, "probe-timeout"},
-		{"probe without failure limit", func(c *Config) { c.ProbeCmd = "true"; c.ProbeFailureLimit = 0; c.ProbeInterval = 30; c.ProbeTimeout = 5 }, "probe-failure-limit"},
+		{"probe without timeout", func(c *Config) {
+			c.ProbeCmd = "true"
+			c.ProbeTimeout = 0
+			c.ProbeInterval = 30
+			c.ProbeFailureLimit = 3
+		}, "probe-timeout"},
+		{"probe without failure limit", func(c *Config) {
+			c.ProbeCmd = "true"
+			c.ProbeFailureLimit = 0
+			c.ProbeInterval = 30
+			c.ProbeTimeout = 5
+		}, "probe-failure-limit"},
 		{"missing path", func(c *Config) { c.Path = "" }, "Path"},
 		{"nonexistent path", func(c *Config) { c.Path = "/definitely/not/exists/xyz" }, "不存在"},
 	}

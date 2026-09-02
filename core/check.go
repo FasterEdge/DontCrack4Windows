@@ -95,7 +95,9 @@ func checkPassword(r *http.Request, expected string) error {
 // findShell 在 Windows 上寻找可用的 shell 可执行文件。
 // 优先使用 cmd.exe (兼容所有 Windows)，再 powershell.exe（可选）。
 // 注意: pwsh.exe 不在 System32 下，它装在 %ProgramFiles%\PowerShell\<ver>\pwsh.exe，
-//       所以这里不做硬编码探测，需要时靠 createCommand 的 os.Stat 回退 + PATH。
+//
+//	所以这里不做硬编码探测，需要时靠 createCommand 的 os.Stat 回退 + PATH。
+//
 // 都找不到时回退到 "cmd"，由 PATH 决定。
 func findShell() string {
 	candidates := []string{

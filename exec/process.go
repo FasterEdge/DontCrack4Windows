@@ -120,6 +120,7 @@ func (p *Process) StartManagedProcess(h Hooks) error {
 //   - syscall.SIGTERM 在 Windows 上不被支持 (会返回 error)
 //   - os.Interrupt 对应 CTRL_BREAK_EVENT，可用于同控制台组的子进程
 //   - 兜底: 超时后调用 Kill() 强制 TerminateProcess
+//
 // 注意：cmd.Wait() 只能被调用一次。monitor goroutine 已经持有 Wait 的唯一所有权，
 // 这里只负责发信号 + 等待 IsRunning 被 monitor 清掉，超时后 Kill。
 func (p *Process) StopManagedProcess(timeout time.Duration) error {
