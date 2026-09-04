@@ -38,7 +38,7 @@ jobs:
         else
           tar czf ../dontcrack-windows-${{ matrix.target }}.tar.gz dontcrack-windows
         fi
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: 'dontcrack-windows-${{ matrix.target }}'
         path: '${{ github.workspace }}/dontcrack-windows-${{ matrix.target }}.*'
