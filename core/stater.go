@@ -63,7 +63,7 @@ func Start(cfg config.Config) {
 		log.Fatalf("配置检查失败: %v\n", err)
 		return
 	}
-	log.Printf(logo)
+	log.Print(logo) // logo 为动态横幅, 用 Print 而非 Printf 防止其中含 % 时被当作格式指令
 	log.Printf("DontCrack_windows v%s 启动中...\n", cfg.Version)
 	log.Printf("管理进程正在管理的程序: %s\n", cfg.Path)
 
