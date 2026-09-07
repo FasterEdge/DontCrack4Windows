@@ -414,13 +414,13 @@ func parseExtraEnv(s string) []string {
 }
 
 // getShellCmd 构造基于本机 cmd.exe 的 exec.Cmd（用于 -pre 命令）
-func getShellCmd(dir string, args ...string) *osexec.Cmd {
+func getShellCmd(ctx context.Context, dir string, args ...string) *osexec.Cmd {
 	shellPath := findShell()
 	if shellPath == "" {
 		shellPath = "cmd"
 	}
 	fullArgs := append([]string{}, args...)
-	cmd := osexec.Command(shellPath, fullArgs...)
+	cmd := osexec.CommandContext(ctx, shellPath, fullArgs...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -434,7 +434,10 @@ func runPreCommand(cfg config.Config) error {
 		return nil
 	}
 	log.Printf("执行启动前命令: %s", cfg.Pre)
-	cmd := getShellCmd(filepath.Dir(cfg.Path), "/C", cfg.Pre)
+	// 启动前钩子加超时保护: 挂死的 pre 命令会永久阻塞启动(fail-closed)。
+	preCtx, preCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer preCancel()
+	cmd := getShellCmd(preCtx, filepath.Dir(cfg.Path), "/C", cfg.Pre)
 	if env, pathVal := buildChildEnv(cfg.Env); len(env) > 0 {
 		cmd.Env = env
 		log.Printf("PRE环境PATH: %s", pathVal)
@@ -478,7 +481,8 @@ func createCommand(cfg config.Config) *osexec.Cmd {
 	case "batch_script":
 		// cmd.exe /C <script.bat> <args...>
 		cmdArgs := append([]string{"/C", cfg.Path}, args...)
-		cmd = osexec.Command(shellPath, cmdArgs...)
+		// 启动器进程生命周期由 monitor 显式管理, 使用永不取消的后台 ctx。
+		cmd = osexec.CommandContext(context.Background(), shellPath, cmdArgs...)
 	case "powershell_script":
 		// powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script.ps1> <args...>
 		psPath := `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
@@ -486,13 +490,13 @@ func createCommand(cfg config.Config) *osexec.Cmd {
 			psPath = "powershell"
 		}
 		cmdArgs := append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", cfg.Path}, args...)
-		cmd = osexec.Command(psPath, cmdArgs...)
+		cmd = osexec.CommandContext(context.Background(), psPath, cmdArgs...)
 	default:
 		// 二进制 / .exe / 未知: 直接执行
 		if len(args) > 0 {
-			cmd = osexec.Command(cfg.Path, args...)
+			cmd = osexec.CommandContext(context.Background(), cfg.Path, args...)
 		} else {
-			cmd = osexec.Command(cfg.Path)
+			cmd = osexec.CommandContext(context.Background(), cfg.Path)
 		}
 	}
 
