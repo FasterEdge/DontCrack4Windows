@@ -83,13 +83,15 @@ func TestStaleMonitorSkipsRestart(t *testing.T) {
 		t.Fatal("restart plan must be stale when generation changed")
 	}
 
-	// 场景3: 代际一致且无进程 → 不过期，允许重启
+	// 场景3: 代际一致且无进程在运行 → 不过期，允许重启。
+	// 模拟真实退出流: CurrentProcess 仍指向已退出的旧 cmd(退出清理只清 IsRunning, 不清 CurrentProcess)。
 	p.generation = 5
+	p.CurrentProcess = &osexec.Cmd{}
 	p.ProcessMu.Lock()
-	stale = p.generation != 5 || p.IsRunning || p.CurrentProcess != nil
+	stale = p.generation != 5 || p.IsRunning
 	p.ProcessMu.Unlock()
 	if stale {
-		t.Fatal("restart plan must remain valid when generation matches and no process runs")
+		t.Fatal("restart plan must remain valid when generation matches and no process runs (CurrentProcess may be the exited cmd)")
 	}
 }
 
