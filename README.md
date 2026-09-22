@@ -73,7 +73,7 @@ DontCrack.exe ^
 - 返回示例：
      ```
 	{
-	"version": "1.0.20260901",
+	"version": "1.0.20260922",
 	"state": "stopped",
 	"info": "进程管理器正常运行",
 	"timestamp": "2026-08-25 15:28:04",
