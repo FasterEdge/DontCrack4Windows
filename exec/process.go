@@ -245,9 +245,11 @@ func (p *Process) monitor(cmd *exec.Cmd, h Hooks) {
 	}
 	time.Sleep(delay)
 
-	// 睡眠后重新校验：期间若发生手动 startup/shutdown 或已有进程运行，放弃过期重启
+	// 睡眠后重新校验：期间若发生手动 startup/shutdown 或已有进程运行，放弃过期重启。
+	// 注意：不能把 p.CurrentProcess != nil 计入过期条件——本 monitor 退出清理时只清 IsRunning，
+	// CurrentProcess 保留为已退出的旧 cmd(下次 Start 才替换)，用它判 stale 会导致自动重启永不生效。
 	p.ProcessMu.Lock()
-	stale := p.generation != myGeneration || p.IsRunning || p.CurrentProcess != nil
+	stale := p.generation != myGeneration || p.IsRunning
 	p.ProcessMu.Unlock()
 	if stale {
 		if h.Logf != nil {
