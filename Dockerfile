@@ -7,7 +7,7 @@ WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/app .
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN addgroup -S app && adduser -S -G app app
 COPY --from=build /out/app /usr/local/bin/app
 USER app
