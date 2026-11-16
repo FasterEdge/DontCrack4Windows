@@ -1,3 +1,3 @@
 module github.com/FasterEdge/DontCrack4Windows
 
-go 1.25
+go 1.27.4
