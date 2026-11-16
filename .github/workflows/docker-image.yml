@@ -18,7 +18,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - name: 'Go 单元测试'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: '1.26'
     - name: '运行测试'
@@ -36,7 +36,7 @@ jobs:
     - name: '计算工件名'
       shell: bash
       run: echo "ARTIFACT_NAME=dontcrack-windows-docker-image-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ env.ARTIFACT_NAME }}
         path: 'dontcrack-windows-image.tar.gz'
@@ -44,7 +44,7 @@ jobs:
         retention-days: 14
     - name: '上传镜像包到 Release'
       if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         tag_name: ${{ github.event.release.tag_name || github.ref_name }}
         files: 'dontcrack-windows-image.tar.gz'
